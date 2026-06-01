@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from db import init_db, get_conn, seed_data
 from fastapi.middleware.cors import CORSMiddleware
 
-
+// Test comment
 app = FastAPI()
 
 # 👇 ADD THIS BLOCK RIGHT HERE (after app = FastAPI)
