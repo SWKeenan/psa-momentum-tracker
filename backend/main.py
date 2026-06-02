@@ -3,6 +3,8 @@ from db import init_db, get_conn, seed_data
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.sync_api import sync_playwright
 import json
+import math
+from datetime import datetime
 
 app = FastAPI()
 
@@ -22,7 +24,7 @@ seed_data()
 
 
 # =========================
-# PSA TIMESERIES FETCH (PLAYWRIGHT)
+# PSA TIMESERIES FETCH
 # =========================
 def fetch_psa_timeseries(spec_id: int):
     url = f"https://www.psacard.com/api/psa/researchJourney/spec/{spec_id}/psa/priceSummary"
@@ -37,13 +39,19 @@ def fetch_psa_timeseries(spec_id: int):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-
         context = browser.new_context()
 
-        # ✅ IMPORTANT: use API request instead of page.goto
-        response = context.request.get(url, params=params)
-
+        response = context.request.get(
+        url,
+        params=params,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.psacard.com/",
+        }
+    )
         text = response.text()
+        print("RAW RESPONSE:")
+        print(text[:1000])
 
         browser.close()
 
@@ -60,20 +68,81 @@ def fetch_psa_timeseries(spec_id: int):
         series = data.get("salesSummary", [])
 
         cleaned = []
+
         for point in series:
             m = point.get("metrics", {})
+
+            avg = m.get("averagePrice")
+            latest = m.get("latestPrice")
+            qty = m.get("quantity") or 0
+
+            if avg and latest:
+                momentum = ((latest - avg) / avg) + math.log(1 + qty)
+            else:
+                momentum = 0
+
             cleaned.append({
                 "date": point.get("date"),
-                "avg": m.get("averagePrice"),
-                "latest": m.get("latestPrice"),
-                "qty": m.get("quantity")
+                "avg": avg,
+                "latest": latest,
+                "qty": qty,
+                "momentum": momentum
             })
 
         return cleaned
 
 
 # =========================
-# IMPORT ENDPOINT (DEBUG / INGESTION)
+# 🔥 SNAPSHOT REFRESH FUNCTION (PUT HERE)
+# =========================
+def refresh_snapshots():
+    conn = get_conn()
+    c = conn.cursor()
+
+    rows = c.execute("""
+        SELECT spec_id, name FROM cards
+    """).fetchall()
+
+    for spec_id, name in rows:
+
+        print("Refreshing:", spec_id)
+
+        series = fetch_psa_timeseries(spec_id)
+
+        print("Series length:", len(series))
+
+        if not series:
+            print("No data for:", spec_id)
+            continue
+
+        last = series[-1]
+
+        print("Last:", last)
+
+        c.execute("""
+            INSERT INTO card_snapshot (spec_id, name, avg, latest, momentum, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(spec_id) DO UPDATE SET
+                name=excluded.name,
+                avg=excluded.avg,
+                latest=excluded.latest,
+                momentum=excluded.momentum,
+                updated_at=excluded.updated_at
+        """, (
+            spec_id,
+            name,
+            last.get("avg"),
+            last.get("latest"),
+            last.get("momentum"),
+            datetime.utcnow().isoformat()
+        ))
+
+    conn.commit()
+    conn.close()
+
+
+# =========================
+# IMPORT ENDPOINT
 # =========================
 @app.post("/import/{spec_id}")
 def import_spec(spec_id: int):
@@ -87,7 +156,7 @@ def import_spec(spec_id: int):
 
 
 # =========================
-# CARDS (OLD SYSTEM - leaderboard)
+# CARDS (SNAPSHOT SYSTEM - FAST DASHBOARD)
 # =========================
 @app.get("/cards")
 def cards():
@@ -95,24 +164,28 @@ def cards():
     c = conn.cursor()
 
     rows = c.execute("""
-        SELECT c.spec_id, c.name,
-        COALESCE(AVG(s.price),0) as avg_price
-        FROM cards c
-        LEFT JOIN sales s ON c.spec_id = s.spec_id
-        GROUP BY c.spec_id
-        ORDER BY avg_price DESC
+        SELECT spec_id, name, avg, latest, momentum, updated_at
+        FROM card_snapshot
+        ORDER BY momentum DESC
     """).fetchall()
 
     conn.close()
 
     return [
-        {"spec_id": r[0], "name": r[1], "avg": r[2]}
+        {
+            "spec_id": r[0],
+            "name": r[1],
+            "avg": r[2],
+            "latest": r[3],
+            "momentum": r[4],
+            "updated_at": r[5],
+        }
         for r in rows
     ]
 
 
 # =========================
-# CARD TIMESERIES (FRONTEND)
+# CARD TIMESERIES
 # =========================
 @app.get("/card/{spec_id}")
 def card(spec_id: int):
@@ -120,3 +193,13 @@ def card(spec_id: int):
         "spec_id": spec_id,
         "timeseries": fetch_psa_timeseries(spec_id)
     }
+
+
+# =========================
+# 🔥 NEW: MANUAL REFRESH ENDPOINT
+# =========================
+@app.get("/refresh")
+@app.post("/refresh")
+def refresh():
+    refresh_snapshots()
+    return {"status": "ok"}
