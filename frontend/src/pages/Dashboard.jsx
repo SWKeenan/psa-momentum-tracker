@@ -18,19 +18,24 @@ export default function Dashboard() {
     fetch(`http://localhost:8000/card/${specId}`)
       .then((r) => r.json())
       .then((data) => {
+        console.log(data.timeseries[0]);
+
         setSelectedCard(data.spec_id);
 
-        // normalize for chart (NOW includes latest)
         const cleaned = (data.timeseries || []).map((p) => ({
           date: p.date,
           avg: typeof p.avg === "number" ? p.avg : null,
           latest: typeof p.latest === "number" ? p.latest : null,
           qty: p.qty ?? 0,
+          momentum: typeof p.momentum === "number" ? p.momentum : null,
         }));
 
         setSeries(cleaned);
       });
   }, []);
+
+  // ✅ safe last point (always aligned correctly)
+  const lastPoint = series.length > 0 ? series[series.length - 1] : null;
 
   return (
     <div style={{ padding: 20 }}>
@@ -42,12 +47,20 @@ export default function Dashboard() {
       <div style={{ width: "100%", height: 300, marginBottom: 30 }}>
         <ResponsiveContainer>
           <LineChart data={series}>
+            {/* X axis */}
             <XAxis dataKey="date" />
-            <YAxis />
+
+            {/* Price axis */}
+            <YAxis yAxisId="price" />
+
+            {/* Momentum axis */}
+            <YAxis yAxisId="momentum" orientation="right" />
+
             <Tooltip />
 
-            {/* 📈 Avg price (baseline trend) */}
+            {/* 🔵 Avg price (trend) */}
             <Line
+              yAxisId="price"
               type="monotone"
               dataKey="avg"
               stroke="#4f46e5"
@@ -55,11 +68,12 @@ export default function Dashboard() {
               dot={false}
             />
 
-            {/* 🚀 Latest price (hype / spikes / sentiment) */}
+            {/* 🟢 Momentum (signal) */}
             <Line
+              yAxisId="momentum"
               type="monotone"
-              dataKey="latest"
-              stroke="#ef4444"
+              dataKey="momentum"
+              stroke="#10b981"
               strokeWidth={2}
               dot={false}
             />
@@ -75,6 +89,7 @@ export default function Dashboard() {
             <th>Avg Price</th>
             <th>Latest Price</th>
             <th>Qty</th>
+            <th>Momentum</th>
           </tr>
         </thead>
 
@@ -90,6 +105,8 @@ export default function Dashboard() {
               </td>
 
               <td>{p.qty ?? "—"}</td>
+
+              <td>{p.momentum?.toFixed(3) ?? "—"}</td>
             </tr>
           ))}
         </tbody>
