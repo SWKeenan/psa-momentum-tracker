@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from db import init_db, get_conn, seed_data
 from fastapi.middleware.cors import CORSMiddleware
-import requests  # 👈 ADD THIS
+import requests
 
 app = FastAPI()
 
@@ -21,42 +21,72 @@ seed_data()
 
 
 # =========================
-# PSA FETCH FUNCTION (NEW)
+# PSA TIMESERIES FETCH
 # =========================
-def fetch_psa_summary(spec_id: int):
+def fetch_psa_timeseries(spec_id: int):
+    import requests
+
     url = f"https://www.psacard.com/api/psa/researchJourney/spec/{spec_id}/psa/priceSummary"
 
     params = {
-        "salesSummaryType": "GRADES",
+        "g": "",   # REMOVE grade filter
+        "tr": 0,
+        "salesSummaryType": "TIMESERIES",
         "q": "false",
         "gt": "SINGLE_GRADED"
     }
 
-    r = requests.get(url, params=params)
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Referer": "https://www.psacard.com/"
+    }
+
+    r = requests.get(url, params=params, headers=headers)
 
     print("STATUS:", r.status_code)
-    print("HEADERS:", r.headers.get("content-type"))
-    print("TEXT PREVIEW:", r.text[:500])
+    print("RAW TEXT:", r.text[:500])
 
-    return r
+    try:
+        data = r.json()
+    except Exception as e:
+        print("JSON ERROR:", e)
+        return []
+
+    print("JSON KEYS:", data.keys())
+
+    series = data.get("salesSummary", [])
+    print("SERIES LENGTH:", len(series))
+
+    cleaned = []
+    for point in series:
+        m = point["metrics"]
+        cleaned.append({
+            "date": point["date"],
+            "avg": m["averagePrice"],
+            "latest": m["latestPrice"],
+            "qty": m["quantity"]
+        })
+
+    return cleaned
 
 
 # =========================
-# IMPORT ENDPOINT (NEW STEP 1)
+# IMPORT ENDPOINT (DEBUG / INGESTION)
 # =========================
 @app.post("/import/{spec_id}")
 def import_spec(spec_id: int):
-    r = fetch_psa_summary(spec_id)
+    series = fetch_psa_timeseries(spec_id)
 
     return {
-        "status_code": r.status_code,
-        "content_type": r.headers.get("content-type"),
-        "preview": r.text[:300]
+        "spec_id": spec_id,
+        "points": len(series),
+        "sample": series[-3:]
     }
 
 
 # =========================
-# EXISTING ENDPOINTS (UNCHANGED)
+# CARDS (OLD SYSTEM - still used for leaderboard)
 # =========================
 @app.get("/cards")
 def cards():
@@ -80,18 +110,12 @@ def cards():
     ]
 
 
+# =========================
+# CARD TIMESERIES (NEW FRONTEND DATA)
+# =========================
 @app.get("/card/{spec_id}")
 def card(spec_id: int):
-    conn = get_conn()
-    c = conn.cursor()
-
-    rows = c.execute("""
-        SELECT date, price
-        FROM sales
-        WHERE spec_id = ?
-        ORDER BY date
-    """, (spec_id,)).fetchall()
-
-    conn.close()
-
-    return {"sales": rows}
+    return {
+        "spec_id": spec_id,
+        "timeseries": fetch_psa_timeseries(spec_id)
+    }
