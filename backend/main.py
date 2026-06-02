@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from db import init_db, get_conn, seed_data
 from fastapi.middleware.cors import CORSMiddleware
-import requests
+from playwright.sync_api import sync_playwright
+import json
 
 app = FastAPI()
 
@@ -21,54 +22,54 @@ seed_data()
 
 
 # =========================
-# PSA TIMESERIES FETCH
+# PSA TIMESERIES FETCH (PLAYWRIGHT)
 # =========================
 def fetch_psa_timeseries(spec_id: int):
-    import requests
-
     url = f"https://www.psacard.com/api/psa/researchJourney/spec/{spec_id}/psa/priceSummary"
 
     params = {
-        "g": "",   # REMOVE grade filter
+        "g": 10,
         "tr": 0,
         "salesSummaryType": "TIMESERIES",
         "q": "false",
         "gt": "SINGLE_GRADED"
     }
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Referer": "https://www.psacard.com/"
-    }
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
 
-    r = requests.get(url, params=params, headers=headers)
+        context = browser.new_context()
 
-    print("STATUS:", r.status_code)
-    print("RAW TEXT:", r.text[:500])
+        # ✅ IMPORTANT: use API request instead of page.goto
+        response = context.request.get(url, params=params)
 
-    try:
-        data = r.json()
-    except Exception as e:
-        print("JSON ERROR:", e)
-        return []
+        text = response.text()
 
-    print("JSON KEYS:", data.keys())
+        browser.close()
 
-    series = data.get("salesSummary", [])
-    print("SERIES LENGTH:", len(series))
+        if not text or not text.strip().startswith("{"):
+            print("BLOCKED RESPONSE:", text[:300])
+            return []
 
-    cleaned = []
-    for point in series:
-        m = point["metrics"]
-        cleaned.append({
-            "date": point["date"],
-            "avg": m["averagePrice"],
-            "latest": m["latestPrice"],
-            "qty": m["quantity"]
-        })
+        try:
+            data = json.loads(text)
+        except Exception as e:
+            print("JSON ERROR:", e)
+            return []
 
-    return cleaned
+        series = data.get("salesSummary", [])
+
+        cleaned = []
+        for point in series:
+            m = point.get("metrics", {})
+            cleaned.append({
+                "date": point.get("date"),
+                "avg": m.get("averagePrice"),
+                "latest": m.get("latestPrice"),
+                "qty": m.get("quantity")
+            })
+
+        return cleaned
 
 
 # =========================
@@ -81,12 +82,12 @@ def import_spec(spec_id: int):
     return {
         "spec_id": spec_id,
         "points": len(series),
-        "sample": series[-3:]
+        "sample": series[-3:] if len(series) >= 3 else series
     }
 
 
 # =========================
-# CARDS (OLD SYSTEM - still used for leaderboard)
+# CARDS (OLD SYSTEM - leaderboard)
 # =========================
 @app.get("/cards")
 def cards():
@@ -111,7 +112,7 @@ def cards():
 
 
 # =========================
-# CARD TIMESERIES (NEW FRONTEND DATA)
+# CARD TIMESERIES (FRONTEND)
 # =========================
 @app.get("/card/{spec_id}")
 def card(spec_id: int):
