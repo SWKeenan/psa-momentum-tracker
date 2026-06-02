@@ -1,15 +1,16 @@
 from fastapi import FastAPI
 from db import init_db, get_conn, seed_data
 from fastapi.middleware.cors import CORSMiddleware
+import requests  # 👈 ADD THIS
 
-// Test comment
 app = FastAPI()
-
-# 👇 ADD THIS BLOCK RIGHT HERE (after app = FastAPI)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -18,6 +19,45 @@ app.add_middleware(
 init_db()
 seed_data()
 
+
+# =========================
+# PSA FETCH FUNCTION (NEW)
+# =========================
+def fetch_psa_summary(spec_id: int):
+    url = f"https://www.psacard.com/api/psa/researchJourney/spec/{spec_id}/psa/priceSummary"
+
+    params = {
+        "salesSummaryType": "GRADES",
+        "q": "false",
+        "gt": "SINGLE_GRADED"
+    }
+
+    r = requests.get(url, params=params)
+
+    print("STATUS:", r.status_code)
+    print("HEADERS:", r.headers.get("content-type"))
+    print("TEXT PREVIEW:", r.text[:500])
+
+    return r
+
+
+# =========================
+# IMPORT ENDPOINT (NEW STEP 1)
+# =========================
+@app.post("/import/{spec_id}")
+def import_spec(spec_id: int):
+    r = fetch_psa_summary(spec_id)
+
+    return {
+        "status_code": r.status_code,
+        "content_type": r.headers.get("content-type"),
+        "preview": r.text[:300]
+    }
+
+
+# =========================
+# EXISTING ENDPOINTS (UNCHANGED)
+# =========================
 @app.get("/cards")
 def cards():
     conn = get_conn()
