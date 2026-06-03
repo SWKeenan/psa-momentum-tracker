@@ -12,7 +12,7 @@ def init_db():
     c = conn.cursor()
 
     # =========================
-    # CORE TABLES
+    # CARDS (auto-filled via /import)
     # =========================
     c.execute("""
     CREATE TABLE IF NOT EXISTS cards (
@@ -21,16 +21,8 @@ def init_db():
     )
     """)
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS sales (
-        spec_id INTEGER,
-        date TEXT,
-        price REAL
-    )
-    """)
-
     # =========================
-    # SNAPSHOT TABLE (NEW)
+    # SNAPSHOT TABLE (dashboard speed layer)
     # =========================
     c.execute("""
     CREATE TABLE IF NOT EXISTS card_snapshot (
@@ -42,21 +34,6 @@ def init_db():
         updated_at TEXT
     )
     """)
-
-    conn.commit()
-    conn.close()
-
-
-def seed_data():
-    conn = get_conn()
-    c = conn.cursor()
-
-    # =========================
-    # REAL PSA CARDS
-    # Replace these with cards you actually want to track
-    # =========================
-    c.execute("INSERT OR IGNORE INTO cards VALUES (2306882, 'Scizor PSA Test')")
-    c.execute("INSERT OR IGNORE INTO cards VALUES (11847394, 'Pikachu Promo')")
 
     conn.commit()
     conn.close()

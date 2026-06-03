@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from db import init_db, get_conn, seed_data
+from db import init_db, get_conn
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.sync_api import sync_playwright
 import json
@@ -20,7 +20,6 @@ app.add_middleware(
 )
 
 init_db()
-seed_data()
 
 
 # =========================
@@ -147,12 +146,49 @@ def refresh_snapshots():
 @app.get("/import/{spec_id}")
 @app.post("/import/{spec_id}")
 def import_spec(spec_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+
+    # 1. fetch metadata from PSA (we don't fully trust name, but we store placeholder)
     series = fetch_psa_timeseries(spec_id)
 
+    if not series:
+        return {"error": "No data from PSA", "spec_id": spec_id}
+
+    last = series[-1]
+
+    # 2. ensure card exists
+    c.execute(
+        "INSERT OR IGNORE INTO cards (spec_id, name) VALUES (?, ?)",
+        (spec_id, f"Card {spec_id}")
+    )
+
+    # 3. write snapshot immediately
+    c.execute("""
+        INSERT INTO card_snapshot (spec_id, name, avg, latest, momentum, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(spec_id) DO UPDATE SET
+            name=excluded.name,
+            avg=excluded.avg,
+            latest=excluded.latest,
+            momentum=excluded.momentum,
+            updated_at=excluded.updated_at
+    """, (
+        spec_id,
+        f"Card {spec_id}",
+        last.get("avg"),
+        last.get("latest"),
+        last.get("momentum"),
+        datetime.utcnow().isoformat()
+    ))
+
+    conn.commit()
+    conn.close()
+
     return {
+        "status": "imported",
         "spec_id": spec_id,
-        "points": len(series),
-        "sample": series[-3:] if len(series) >= 3 else series
+        "latest": last
     }
 
 
