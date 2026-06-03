@@ -52,20 +52,11 @@ def seed_data():
     c = conn.cursor()
 
     # =========================
-    # CARDS
+    # REAL PSA CARDS
+    # Replace these with cards you actually want to track
     # =========================
-    c.execute("INSERT OR IGNORE INTO cards VALUES (1, 'Scizor Holo')")
-    c.execute("INSERT OR IGNORE INTO cards VALUES (2, 'Steelix Deck Promo')")
-
-    # =========================
-    # SALES (fake momentum example)
-    # =========================
-    c.execute("INSERT INTO sales VALUES (1, '2026-01-01', 200)")
-    c.execute("INSERT INTO sales VALUES (1, '2026-02-01', 220)")
-    c.execute("INSERT INTO sales VALUES (1, '2026-03-01', 300)")
-    c.execute("INSERT INTO sales VALUES (1, '2026-04-01', 450)")
-    c.execute("INSERT INTO sales VALUES (1, '2026-05-01', 900)")
-    c.execute("INSERT INTO sales VALUES (1, '2026-05-28', 1950)")
+    c.execute("INSERT OR IGNORE INTO cards VALUES (2306882, 'Scizor PSA Test')")
+    c.execute("INSERT OR IGNORE INTO cards VALUES (11847394, 'Pikachu Promo')")
 
     conn.commit()
     conn.close()

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Line,
   LineChart,
@@ -9,108 +10,105 @@ import {
 } from "recharts";
 
 export default function Dashboard() {
-  const [selectedCard, setSelectedCard] = useState(null);
-  const [series, setSeries] = useState([]);
-
-  const specId = 2306882;
+  const [cards, setCards] = useState([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetch(`http://localhost:8000/card/${specId}`)
+    // Fetch card snapshots first
+    fetch("http://localhost:8000/cards")
       .then((r) => r.json())
-      .then((data) => {
-        console.log(data.timeseries[0]);
+      .then(async (snapshotCards) => {
+        // For each card, fetch its full timeseries
+        const cardsWithSeries = await Promise.all(
+          snapshotCards.map(async (card) => {
+            try {
+              const resp = await fetch(
+                `http://localhost:8000/card/${card.spec_id}`,
+              );
+              const data = await resp.json();
+              // Map timeseries to cleaned series
+              const series = (data.timeseries || []).map((p) => ({
+                date: p.date,
+                avg: p.avg ?? null,
+                momentum: p.momentum ?? null,
+              }));
+              return { ...card, series };
+            } catch (err) {
+              console.error("Error fetching timeseries for", card.spec_id, err);
+              return { ...card, series: [] };
+            }
+          }),
+        );
 
-        setSelectedCard(data.spec_id);
-
-        const cleaned = (data.timeseries || []).map((p) => ({
-          date: p.date,
-          avg: typeof p.avg === "number" ? p.avg : null,
-          latest: typeof p.latest === "number" ? p.latest : null,
-          qty: p.qty ?? 0,
-          momentum: typeof p.momentum === "number" ? p.momentum : null,
-        }));
-
-        setSeries(cleaned);
+        setCards(cardsWithSeries);
       });
   }, []);
-
-  // ✅ safe last point (always aligned correctly)
-  const lastPoint = series.length > 0 ? series[series.length - 1] : null;
 
   return (
     <div style={{ padding: 20 }}>
       <h1>🔥 PSA Momentum Dashboard</h1>
 
-      <h3>Spec ID: {selectedCard}</h3>
+      {/* Grid of cards */}
+      <div style={{ display: "grid", gap: 20 }}>
+        {cards.map((card) => (
+          <div
+            key={card.spec_id}
+            style={{
+              border: "1px solid #ccc",
+              borderRadius: 8,
+              padding: 12,
+              cursor: "pointer",
+              transition: "box-shadow 0.2s",
+            }}
+            onClick={() => navigate(`/card/${card.spec_id}`)}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = "0 0 10px rgba(0,0,0,0.3)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = "none";
+            }}
+          >
+            <h3>{card.name}</h3>
+            <p>Spec ID: {card.spec_id}</p>
+            <p>Avg: €{card.avg?.toFixed(2)}</p>
+            <p>Latest: €{card.latest?.toFixed(2)}</p>
+            <p>Momentum: {card.momentum?.toFixed(3)}</p>
 
-      {/* 📊 CHART */}
-      <div style={{ width: "100%", height: 300, marginBottom: 30 }}>
-        <ResponsiveContainer>
-          <LineChart data={series}>
-            {/* X axis */}
-            <XAxis dataKey="date" />
-
-            {/* Price axis */}
-            <YAxis yAxisId="price" />
-
-            {/* Momentum axis */}
-            <YAxis yAxisId="momentum" orientation="right" />
-
-            <Tooltip />
-
-            {/* 🔵 Avg price (trend) */}
-            <Line
-              yAxisId="price"
-              type="monotone"
-              dataKey="avg"
-              stroke="#4f46e5"
-              strokeWidth={2}
-              dot={false}
-            />
-
-            {/* 🟢 Momentum (signal) */}
-            <Line
-              yAxisId="momentum"
-              type="monotone"
-              dataKey="momentum"
-              stroke="#10b981"
-              strokeWidth={2}
-              dot={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+            {/* Mini sparkline chart */}
+            <div style={{ width: "100%", height: 150, marginTop: 10 }}>
+              <ResponsiveContainer>
+                <LineChart data={card.series}>
+                  <XAxis dataKey="date" hide />
+                  <YAxis yAxisId="price" hide domain={["dataMin", "dataMax"]} />
+                  <YAxis
+                    yAxisId="momentum"
+                    orientation="right"
+                    hide
+                    domain={["dataMin", "dataMax"]}
+                  />
+                  <Tooltip />
+                  <Line
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="avg"
+                    stroke="#4f46e5"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    yAxisId="momentum"
+                    type="monotone"
+                    dataKey="momentum"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ))}
       </div>
-
-      {/* 📋 TABLE */}
-      <table border="1" cellPadding="10">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Avg Price</th>
-            <th>Latest Price</th>
-            <th>Qty</th>
-            <th>Momentum</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {series.map((p) => (
-            <tr key={p.date}>
-              <td>{p.date}</td>
-
-              <td>€{typeof p.avg === "number" ? p.avg.toFixed(2) : "—"}</td>
-
-              <td>
-                €{typeof p.latest === "number" ? p.latest.toFixed(2) : "—"}
-              </td>
-
-              <td>{p.qty ?? "—"}</td>
-
-              <td>{p.momentum?.toFixed(3) ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

@@ -144,6 +144,7 @@ def refresh_snapshots():
 # =========================
 # IMPORT ENDPOINT
 # =========================
+@app.get("/import/{spec_id}")
 @app.post("/import/{spec_id}")
 def import_spec(spec_id: int):
     series = fetch_psa_timeseries(spec_id)
